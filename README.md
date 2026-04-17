@@ -2,7 +2,6 @@
 
 > INS-guided, GPS-independent multi-drone coordination with A* path planning, SQLite telemetry logging, and a real-time web dashboard.
 
-![CI](https://github.com/YOUR_USERNAME/swayam/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
