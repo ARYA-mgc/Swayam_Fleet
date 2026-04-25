@@ -9,22 +9,37 @@
 
 ## Features
 
-| Feature | Details |
-|---|---|
 | **INS Navigation** | Dead-reckoning via IMU integration — body-to-world frame rotation, gravity compensation, velocity & position tracking. No GPS required. |
 | **A\* Path Planning** | 8-directional A\* on a 50×50m occupancy grid with Euclidean heuristic and obstacle inflation. |
 | **MAVLink Integration** | `SET_POSITION_TARGET_LOCAL_NED` setpoints, ARM/DISARM, mode switching, `SCALED_IMU2` telemetry. Works over UDP, TCP, or serial. |
 | **Fleet Coordination** | N drones in parallel threads. Broadcast missions or individual assignments. Emergency land all. |
 | **SQLite Database** | 3-table schema: `flight_logs`, `ins_telemetry`, `missions`. Thread-safe. JSON export. |
-| **Web Dashboard** | Flask UI on `:5050` — live fleet cards, INS map, filterable log table, broadcast controls. Auto-refreshes every 4s. |
+| **Mission Planner GCS** | Native integration with Mission Planner. Acting as a MAVLink relay, allowing GCS to discover and control the entire swarm through standard UDP/TCP ports. |
 | **Hardware Platform** | Optimized for **Pixhawk Cube Orange** + **Raspberry Pi 4** (Companion Computer) via Serial/MAVLink. |
-| **Simulation Mode** | Full simulation without hardware — synthetic IMU, path execution, DB writes. Great for CI and development. |
+| **Advanced Relay** | High-performance MAVLink multiplexer (`swarm_gcs_relay.py`) for aggregating swarm traffic into a single GCS instance. |
 
 ---
 
 ## Architecture
 
-The `swayam/` project is organized as a modular autonomous drone swarm framework. It includes `swayam_core.py` as the main core library with five primary classes, `swayam_dashboard.py` for the Flask-based monitoring dashboard, `mavlink_bridge.py` for reliable Raspberry Pi to Cube Orange MAVLink communication, and `swarm_telemetry.py` for UDP telemetry broadcasting across the swarm. The `pi4_swarm_node.py` acts as the main Raspberry Pi 4 node controller, while `mission_manager.py` handles multi-drone waypoint missions. System diagnostics are managed through `system_health.py`, and secure communication is provided by `swarm_security.py` using AES-GCM encryption with anti-replay protection. Autonomous swarm behavior such as leader-follower logic and collision avoidance is implemented in `swarm_autonomous_logic.py`, while `swarm_commands.py` defines inter-drone commands and messages. Hardware setup is configured through `pi_hardware_config.py`, synchronization is handled in `swarm_sync.py`, testing is covered by `test_swayam.py` with 30+ pytest unit tests, dependencies are listed in `requirements.txt`, and full documentation is available in `README.md`.
+swayam/
+├── swayam_core.py          # Core library — 5 classes
+├── swarm_gcs_relay.py      # [ADVANCED] MAVLink multiplexer/router
+├── advanced_telem_bridge.py # [NEW] INS-to-MAVLink telemetry mapper
+├── mission_planner_config.py # Mission Planner connection helper
+├── mavlink_bridge.py       # Robust Pi-to-Cube MAVLink Bridge
+├── swarm_telemetry.py      # Swarm-wide UDP telemetry broadcaster
+├── pi4_swarm_node.py       # Main RPi4 Node controller
+├── mission_manager.py      # Multi-drone waypoint mission handler
+├── system_health.py        # RPi4 + Pixhawk resource monitoring
+├── swarm_security.py       # AES-GCM Encryption & Anti-Replay
+├── swarm_autonomous_logic.py # Leader-follower & collision avoidance
+├── swarm_commands.py        # Inter-drone command definitions
+├── pi_hardware_config.py   # RPi 4 + Cube Orange Hardware Config
+├── swarm_sync.py           # Multi-drone synchronization logic
+├── test_swayam.py          # pytest unit tests
+├── requirements.txt
+└── README.md
 ### Core Classes (`src/swayam_core.py`)
 
 ```
@@ -47,31 +62,17 @@ cd swayam
 pip install -r requirements.txt
 ```
 
-### 2. Run Simulation (no hardware needed)
-
+### 2. Run Mission Planner Simulation
 ```bash
+# Start the simulation with GCS broadcasting
 python scripts/run_simulation.py
 ```
 
-Output:
-```
-╔══════════════════════════════════════╗
-║   SWAYAM  —  Simulation Mode         ║
-╚══════════════════════════════════════╝
-
-[LAUNCH] ALPHA → N=15.0 E=12.0 Alt=10.0m
-[LAUNCH] BETA  → N=-8.0 E=18.0 Alt=15.0m
-[LAUNCH] GAMMA → N=5.0  E=-5.0 Alt=12.0m
-...
-✓ Simulation complete.
-```
-
-### 3. Launch Dashboard
-
-```bash
-python swayam_dashboard.py
-# Open http://localhost:5050
-```
+### 3. Connect Mission Planner
+1. Open **Mission Planner**.
+2. Select **UDP** and click **Connect**.
+3. Enter port **14550**.
+4. The drones **ALPHA**, **BETA**, and **GAMMA** will appear automatically.
 
 ### 4. Run Tests
 
@@ -199,17 +200,25 @@ path = fleet.plan_path("ALPHA", goal_n=20, goal_e=18)
 
 ---
 
-## Dashboard API
+## Mission Planner Integration
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/` | GET | Web dashboard |
-| `/api/status` | GET | All drone status + INS |
-| `/api/logs` | GET | Recent flight logs |
-| `/api/ins/<drone_id>` | GET | INS telemetry history |
-| `/api/mission` | POST | Broadcast mission `{goal_n, goal_e}` |
-| `/api/emergency_land` | POST | Land all drones immediately |
-| `/api/export` | GET | Export DB to JSON |
+The system uses `SwayamFleet` to act as a MAVLink relay. Each `DroneAgent` can connect to a GCS (Mission Planner) and forward telemetry.
+
+### Advanced Multiplexing (`swarm_gcs_relay.py`)
+For large swarms, use the `SwarmGCSRelay` class to aggregate all drones into a single stream:
+```python
+relay = SwarmGCSRelay("udpout:127.0.0.1:14550")
+relay.add_drone(1, "udpin:127.0.0.1:14551") # Drone 1
+relay.add_drone(2, "udpin:127.0.0.1:14552") # Drone 2
+relay.start()
+```
+
+### INS to MAVLink Mapping (`advanced_telem_bridge.py`)
+Internal INS state is mapped to standard MAVLink messages:
+- `LOCAL_POSITION_NED`: Relative coordinates from start.
+- `GLOBAL_POSITION_INT`: GPS-like visualization on MP map.
+- `ATTITUDE`: High-rate roll, pitch, yaw.
+- `SYS_STATUS`: Battery and health monitoring.
 
 ---
 

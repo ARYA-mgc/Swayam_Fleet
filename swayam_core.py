@@ -212,16 +212,20 @@ class DroneAgent:
         drone_id: str,
         system_id: int = 1,
         connection_string: str = "udp:127.0.0.1:14550",
+        gcs_url: Optional[str] = None,
         simulation: bool = True,
     ):
         self.drone_id = drone_id
         self.system_id = system_id
         self.connection_string = connection_string
+        self.gcs_url = gcs_url
         self.simulation = simulation or not MAVLINK_AVAILABLE
 
         self.ins = INSState()
         self.conn = None
+        self.gcs_conn = None
         self._telem_thread: Optional[threading.Thread] = None
+        self._relay_thread: Optional[threading.Thread] = None
         self._running = False
 
         self.battery_pct: float = 100.0
@@ -233,38 +237,66 @@ class DroneAgent:
         self.mission_active: bool = False
 
         self.log = logging.getLogger(f"swayam.drone.{drone_id}")
-        self.log.info(f"DroneAgent '{drone_id}' created (sim={self.simulation})")
+        self.log.info(f"DroneAgent '{drone_id}' (sysid={system_id}) created (sim={self.simulation})")
+        if self.gcs_url:
+            self.log.info(f"GCS Link enabled: {self.gcs_url}")
 
     # --- Connection ---
     def connect(self) -> bool:
+        self._running = True
+        
+        # Connect to GCS if specified
+        if self.gcs_url and MAVLINK_AVAILABLE:
+            try:
+                self.log.info(f"Connecting to GCS at {self.gcs_url}...")
+                self.gcs_conn = mavutil.mavlink_connection(
+                    self.gcs_url,
+                    source_system=self.system_id,
+                    source_component=mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+                )
+            except Exception as e:
+                self.log.error(f"GCS Connection failed: {e}")
+
         if self.simulation:
-            self.log.info("Simulation mode — skipping MAVLink connect.")
-            self._running = True
+            self.log.info("Simulation mode — starting simulated telemetry.")
             self._telem_thread = threading.Thread(target=self._sim_telemetry, daemon=True)
             self._telem_thread.start()
             return True
 
         try:
-            self.log.info(f"Connecting to {self.connection_string} ...")
+            self.log.info(f"Connecting to FCU at {self.connection_string} ...")
             self.conn = mavutil.mavlink_connection(
                 self.connection_string,
-                source_system=255,
+                source_system=255, # GCS system ID
                 source_component=0,
             )
             self.conn.wait_heartbeat(timeout=10)
             self.log.info(f"Heartbeat received from sysid={self.conn.target_system}")
-            self._running = True
+            
+            # Start Telemetry Loop
             self._telem_thread = threading.Thread(target=self._telemetry_loop, daemon=True)
             self._telem_thread.start()
+            
+            # Start Relay Loop if GCS is connected
+            if self.gcs_conn:
+                self._relay_thread = threading.Thread(target=self._relay_loop, daemon=True)
+                self._relay_thread.start()
+                
             return True
         except Exception as e:
-            self.log.error(f"Connection failed: {e}")
+            self.log.error(f"FCU Connection failed: {e}")
             return False
 
     def disconnect(self):
         self._running = False
         if self._telem_thread:
-            self._telem_thread.join(timeout=2)
+            self._telem_thread.join(timeout=1)
+        if self._relay_thread:
+            self._relay_thread.join(timeout=1)
+        if self.conn:
+            self.conn.close()
+        if self.gcs_conn:
+            self.gcs_conn.close()
         self.log.info("Disconnected.")
 
     # --- MAVLink Commands ---
@@ -353,16 +385,20 @@ class DroneAgent:
         last_t = time.time()
         while self._running:
             try:
-                msg = self.conn.recv_match(blocking=True, timeout=1.0)
+                msg = self.conn.recv_match(blocking=True, timeout=0.1)
                 if not msg:
                     continue
+                
+                # Forward to GCS if relay is active
+                if self.gcs_conn:
+                    self.gcs_conn.mav.send(msg)
+
                 now = time.time()
                 dt = now - last_t
                 last_t = now
                 mtype = msg.get_type()
 
                 if mtype == "SCALED_IMU2":
-                    # Units: milli-g and milli-rad/s
                     accel = [msg.xacc / 1000.0, msg.yacc / 1000.0, msg.zacc / 1000.0]
                     gyro  = [msg.xgyro / 1000.0, msg.ygyro / 1000.0, msg.zgyro / 1000.0]
                     self.ins.integrate(accel, gyro, dt)
@@ -377,11 +413,27 @@ class DroneAgent:
             except Exception as e:
                 self.log.debug(f"Telemetry error: {e}")
 
+    def _relay_loop(self):
+        """Forward commands from GCS to FCU."""
+        while self._running:
+            try:
+                msg = self.gcs_conn.recv_match(blocking=True, timeout=0.1)
+                if not msg:
+                    continue
+                
+                # Forward to FCU
+                self.conn.mav.send(msg)
+                self.log.debug(f"Relayed GCS -> FCU: {msg.get_type()}")
+            except Exception as e:
+                self.log.debug(f"Relay error: {e}")
+
     def _sim_telemetry(self):
-        """Simulated IMU + telemetry for testing without hardware."""
+        """Simulated IMU + MAVLink telemetry for Mission Planner."""
         import random
         last_t = time.time()
+        last_hb = 0
         tick = 0
+        
         while self._running:
             time.sleep(0.05)
             now = time.time()
@@ -389,19 +441,72 @@ class DroneAgent:
             last_t = now
             tick += 1
 
-            # Simulate forward flight with gentle oscillation
+            # 1. Physical Simulation
             accel = [
-                0.05 * math.sin(tick * 0.1),    # forward accel
-                0.01 * math.cos(tick * 0.07),   # lateral
-                -9.80665 + random.gauss(0, 0.02) # gravity (body Z down)
+                0.05 * math.sin(tick * 0.1),
+                0.01 * math.cos(tick * 0.07),
+                -9.80665 + random.gauss(0, 0.02)
             ]
             gyro = [
                 random.gauss(0, 0.002),
                 random.gauss(0, 0.002),
-                0.01 * math.sin(tick * 0.05),   # gentle yaw
+                0.01 * math.sin(tick * 0.05),
             ]
             self.ins.integrate(accel, gyro, dt)
-            self.battery_pct = max(0, self.battery_pct - 0.001)
+            self.battery_pct = max(0, self.battery_pct - 0.0001)
+
+            # 2. MAVLink Output (to Mission Planner)
+            if self.gcs_conn:
+                # Heartbeat (1Hz)
+                if now - last_hb > 1.0:
+                    self.gcs_conn.mav.heartbeat_send(
+                        mavutil.mavlink.MAV_TYPE_QUADROTOR,
+                        mavutil.mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA,
+                        mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED | 
+                        (mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED if self.armed else 0),
+                        0,
+                        mavutil.mavlink.MAV_STATE_ACTIVE if self.armed else mavutil.mavlink.MAV_STATE_STANDBY
+                    )
+                    last_hb = now
+
+                # Position (5Hz)
+                if tick % 4 == 0:
+                    # LOCAL_POSITION_NED
+                    self.gcs_conn.mav.local_position_ned_send(
+                        int(now * 1000) & 0xFFFFFFFF,
+                        self.ins.position[0], self.ins.position[1], self.ins.position[2],
+                        self.ins.velocity[0], self.ins.velocity[1], self.ins.velocity[2]
+                    )
+                    # GLOBAL_POSITION_INT (placeholder GPS for Mission Planner map)
+                    # Use a fixed origin (e.g. 12.9716, 77.5946 - Bangalore)
+                    lat, lon = 12.9716, 77.5946
+                    # Approx 1m = 0.00001 deg
+                    plat = int((lat + self.ins.position[0] * 0.000009) * 1e7)
+                    plon = int((lon + self.ins.position[1] * 0.000009) * 1e7)
+                    self.gcs_conn.mav.global_position_int_send(
+                        int(now * 1000) & 0xFFFFFFFF,
+                        plat, plon, int(-self.ins.position[2] * 1000), # alt
+                        int(-self.ins.position[2] * 1000), # relative_alt
+                        int(self.ins.velocity[0] * 100), int(self.ins.velocity[1] * 100), int(self.ins.velocity[2] * 100),
+                        int(self.ins.attitude[2] * 100) # hdg
+                    )
+
+                # Attitude (10Hz)
+                if tick % 2 == 0:
+                    self.gcs_conn.mav.attitude_send(
+                        int(now * 1000) & 0xFFFFFFFF,
+                        self.ins.attitude[0], self.ins.attitude[1], self.ins.attitude[2],
+                        0, 0, 0 # rates
+                    )
+
+                # Battery (2Hz)
+                if tick % 10 == 0:
+                    self.gcs_conn.mav.sys_status_send(
+                        0, 0, 0, 500, # load, sensors, etc
+                        11100, # 11.1V
+                        int(self.battery_pct * 10), # remaining
+                        0, 0, 0, 0, 0, 0, 0
+                    )
 
     # --- Status ---
     def status(self) -> dict:
@@ -563,11 +668,12 @@ class SwayamFleet:
         drone_id: str,
         system_id: int = 1,
         connection_string: str = "udp:127.0.0.1:14550",
+        gcs_url: Optional[str] = None,
         simulation: bool = True,
     ) -> DroneAgent:
-        drone = DroneAgent(drone_id, system_id, connection_string, simulation)
+        drone = DroneAgent(drone_id, system_id, connection_string, gcs_url, simulation)
         self.drones[drone_id] = drone
-        self.db.log_event(drone_id, "DRONE_REGISTERED", f"conn={connection_string} sim={simulation}")
+        self.db.log_event(drone_id, "DRONE_REGISTERED", f"conn={connection_string} gcs={gcs_url} sim={simulation}")
         return drone
 
     def add_obstacle(self, x: int, y: int, radius: int = 1):

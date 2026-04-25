@@ -19,8 +19,10 @@ def main():
     os.makedirs("logs", exist_ok=True)
 
     print("\n╔══════════════════════════════════════╗")
-    print("║   SWAYAM  —  Simulation Mode         ║")
+    print("║   SWAYAM  —  Mission Planner Mode    ║")
     print("╚══════════════════════════════════════╝\n")
+    print("[INFO] Connecting to Mission Planner on UDP:14550")
+    print("[TIP]  Open Mission Planner and connect via UDP port 14550 to see the swarm.\n")
 
     fleet = SwayamFleet(db_path="swayam_flights.db", map_size=50)
 
@@ -30,10 +32,12 @@ def main():
     fleet.add_obstacle(30, 25, radius=2)
     print("[MAP] 3 obstacles placed.")
 
-    # Drones
-    fleet.add_drone("ALPHA", system_id=1, simulation=True)
-    fleet.add_drone("BETA",  system_id=2, simulation=True)
-    fleet.add_drone("GAMMA", system_id=3, simulation=True)
+    # Drones (System IDs 1, 2, 3)
+    # Broadcast to Mission Planner on 14550
+    gcs = "udpout:127.0.0.1:14550"
+    fleet.add_drone("ALPHA", system_id=1, gcs_url=gcs, simulation=True)
+    fleet.add_drone("BETA",  system_id=2, gcs_url=gcs, simulation=True)
+    fleet.add_drone("GAMMA", system_id=3, gcs_url=gcs, simulation=True)
 
     fleet.connect_all()
     print("[FLEET] 3 drones connected (simulation).\n")
