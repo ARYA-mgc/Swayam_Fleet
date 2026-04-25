@@ -1,7 +1,8 @@
-# Swayam — MAVLink Swarm Communication & Fleet Management
+# Swayam — MAVLink Multi-Drone Fleet Management
 
-> **Swarm Communication System** for INS-guided, GPS-independent multi-drone coordination. Developed as part of the [ins-drone-pixhawk](https://github.com/ARYA-mgc/ins-drone-pixhawk) ecosystem by **ARYA-mgc**.
+> INS-guided, GPS-independent multi-drone coordination with A* path planning, SQLite telemetry logging, and a real-time web dashboard.
 
+![CI](https://github.com/YOUR_USERNAME/swayam/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -17,29 +18,28 @@
 | **Fleet Coordination** | N drones in parallel threads. Broadcast missions or individual assignments. Emergency land all. |
 | **SQLite Database** | 3-table schema: `flight_logs`, `ins_telemetry`, `missions`. Thread-safe. JSON export. |
 | **Web Dashboard** | Flask UI on `:5050` — live fleet cards, INS map, filterable log table, broadcast controls. Auto-refreshes every 4s. |
-| **Hardware Platform** | Optimized for **Pixhawk Cube Orange** + **Raspberry Pi 4** (Companion Computer) via Serial/MAVLink. |
 | **Simulation Mode** | Full simulation without hardware — synthetic IMU, path execution, DB writes. Great for CI and development. |
 
 ---
 
 ## Architecture
 
+```
 swayam/
-├── swayam_core.py          # Core library — 5 classes
-├── swayam_dashboard.py     # Flask web dashboard
-├── mavlink_bridge.py       # Robust Pi-to-Cube MAVLink Bridge
-├── swarm_telemetry.py      # Swarm-wide UDP telemetry broadcaster
-├── pi4_swarm_node.py       # Main RPi4 Node controller
-├── mission_manager.py      # [NEW] Multi-drone waypoint mission handler
-├── system_health.py        # [NEW] RPi4 + Pixhawk resource monitoring
-├── swarm_security.py       # [UPGRADED] AES-GCM Encryption & Anti-Replay
-├── swarm_autonomous_logic.py # Leader-follower & collision avoidance
-├── swarm_commands.py        # Inter-drone command definitions
-├── pi_hardware_config.py   # RPi 4 + Cube Orange Hardware Config
-├── swarm_sync.py           # Multi-drone synchronization logic
-├── test_swayam.py          # 30+ pytest unit tests
+├── src/
+│   └── swayam_core.py          # Core library — 5 classes
+├── swayam_dashboard.py         # Flask web dashboard
+├── scripts/
+│   └── run_simulation.py       # Headless simulation runner
+├── tests/
+│   └── test_swayam.py          # 30+ pytest unit tests
+├── logs/                       # Auto-created — DB exports
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions CI
 ├── requirements.txt
 └── README.md
+```
 
 ### Core Classes (`src/swayam_core.py`)
 
@@ -137,36 +137,6 @@ f.connect_all()
 f.execute_mission('SIM', 10, 10, 15)
 "
 ```
-
----
-
-## Technical Performance Analysis
-
-| Image Name | Primary Metric | Analysis |
-|---|---|---|
-| **`hq720.jpg`** | Operational Control | Demonstrates the Mission Planner interface managing a fleet of 5+ drones in `GUIDED` mode. Shows real-time telemetry overlays and waypoint tracking. |
-| **`42452_..._Fig8.png`** | Path Fidelity | A 3D isometric plot of a single drone's flight path. The zig-zag pattern confirms successful execution of complex non-linear waypoint sequences with minimal overshoot. |
-| **`drones-05-...-g009.jpg`** | Swarm Density | Visualizes the "Swarm Center" (red cluster) relative to individual UAV trajectories. High package reception (94%) ensures stable coordination during dense maneuvering. |
-| **`drones-05-...-g010.jpg`** | Separation Safety | Plots the distance between Agent 1 and other swarm members. Critical for collision avoidance; shows agents maintaining safe buffers while following independent paths. |
-| **`drones-05-...-g011.jpg`** | Convergence | Tracks the distance from the swarm centroid to target waypoints. The periodic "sawtooth" pattern indicates rapid convergence to new targets as they are assigned. |
-| **`yaalini.jpg`** | Project Contributor | A personal photo of the project lead/contributor (removed from primary docs but present in root). |
-
-### Visual Documentation
-
-#### Swarm Mission Overview (`hq720.jpg`)
-![Swarm Mission Control](hq720.jpg)
-
-#### 3D Trajectory Analysis (`42452_2024_6408_Fig8_HTML.png`)
-![3D Trajectory](42452_2024_6408_Fig8_HTML.png)
-
-#### Swarm Coordination Graph (`drones-05-00033-g009-550.jpg`)
-![Swarm Coordination](drones-05-00033-g009-550.jpg)
-
-#### Fleet Distance Metrics (`drones-05-00033-g010-550.jpg`)
-![Distance Metrics](drones-05-00033-g010-550.jpg)
-
-#### Waypoint Precision (`drones-05-00033-g011-550.jpg`)
-![Waypoint Tracking](drones-05-00033-g011-550.jpg)
 
 ---
 

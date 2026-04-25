@@ -167,3 +167,4 @@ cython_debug/
 # Project specific
 logs/
 swayam_export.json
+*.db
