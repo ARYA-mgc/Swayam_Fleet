@@ -24,23 +24,7 @@
 
 ## Architecture
 
-swayam/
-├── swayam_core.py          # Core library — 5 classes
-├── swayam_dashboard.py     # Flask web dashboard
-├── mavlink_bridge.py       # Robust Pi-to-Cube MAVLink Bridge
-├── swarm_telemetry.py      # Swarm-wide UDP telemetry broadcaster
-├── pi4_swarm_node.py       # Main RPi4 Node controller
-├── mission_manager.py      # [NEW] Multi-drone waypoint mission handler
-├── system_health.py        # [NEW] RPi4 + Pixhawk resource monitoring
-├── swarm_security.py       # [UPGRADED] AES-GCM Encryption & Anti-Replay
-├── swarm_autonomous_logic.py # Leader-follower & collision avoidance
-├── swarm_commands.py        # Inter-drone command definitions
-├── pi_hardware_config.py   # RPi 4 + Cube Orange Hardware Config
-├── swarm_sync.py           # Multi-drone synchronization logic
-├── test_swayam.py          # 30+ pytest unit tests
-├── requirements.txt
-└── README.md
-
+The `swayam/` project is organized as a modular autonomous drone swarm framework. It includes `swayam_core.py` as the main core library with five primary classes, `swayam_dashboard.py` for the Flask-based monitoring dashboard, `mavlink_bridge.py` for reliable Raspberry Pi to Cube Orange MAVLink communication, and `swarm_telemetry.py` for UDP telemetry broadcasting across the swarm. The `pi4_swarm_node.py` acts as the main Raspberry Pi 4 node controller, while `mission_manager.py` handles multi-drone waypoint missions. System diagnostics are managed through `system_health.py`, and secure communication is provided by `swarm_security.py` using AES-GCM encryption with anti-replay protection. Autonomous swarm behavior such as leader-follower logic and collision avoidance is implemented in `swarm_autonomous_logic.py`, while `swarm_commands.py` defines inter-drone commands and messages. Hardware setup is configured through `pi_hardware_config.py`, synchronization is handled in `swarm_sync.py`, testing is covered by `test_swayam.py` with 30+ pytest unit tests, dependencies are listed in `requirements.txt`, and full documentation is available in `README.md`.
 ### Core Classes (`src/swayam_core.py`)
 
 ```
@@ -153,19 +137,19 @@ f.execute_mission('SIM', 10, 10, 15)
 
 ### Visual Documentation
 
-#### Swarm Mission Overview (`hq720.jpg`)
+#### Swarm Mission Overview :
 ![Swarm Mission Control](hq720.jpg)
 
-#### 3D Trajectory Analysis (`42452_2024_6408_Fig8_HTML.png`)
+#### 3D Trajectory Analysis :
 ![3D Trajectory](42452_2024_6408_Fig8_HTML.png)
 
-#### Swarm Coordination Graph (`drones-05-00033-g009-550.jpg`)
+#### Swarm Coordination Graph:
 ![Swarm Coordination](drones-05-00033-g009-550.jpg)
 
-#### Fleet Distance Metrics (`drones-05-00033-g010-550.jpg`)
+#### Fleet Distance Metrics :
 ![Distance Metrics](drones-05-00033-g010-550.jpg)
 
-#### Waypoint Precision (`drones-05-00033-g011-550.jpg`)
+#### Waypoint Precision:
 ![Waypoint Tracking](drones-05-00033-g011-550.jpg)
 
 ---
