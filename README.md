@@ -25,7 +25,7 @@
 | Repository | Role |
 |---|---|
 | [`ins-drone-pixhawk`](https://github.com/ARYA-mgc/ins-drone-pixhawk) | Core INS navigation, sensor fusion & flight control |
-| **`swarm_drone_communication`** *(this repo)* | Multi-drone swarm coordination, fleet management & GCS relay |
+| **`Swayam_Fleet`** *(this repo)* | Multi-drone swarm coordination, fleet management & GCS relay |
 
 All modules share a common MAVLink transport layer and are designed to operate together on **Pixhawk Cube Orange** + **Raspberry Pi 4** hardware.
 
@@ -87,8 +87,8 @@ swayam/
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/ARYA-mgc/swarm_drone_communication.git
-cd swarm_drone_communication
+git clone https://github.com/ARYA-mgc/Swayam_Fleet.git
+cd Swayam_Fleet
 pip install -r requirements.txt
 ```
 
@@ -162,6 +162,13 @@ f.execute_mission('SIM', 10, 10, 15)
 > *`mission_planner_gcs.jpg`* — Mission Planner interface managing a fleet of drones in `GUIDED` mode with real-time telemetry overlays and waypoint tracking.
 
 ![Mission Planner GCS Interface](mission_planner_gcs.jpg)
+
+---
+
+### Preflight Status & Diagnostics
+> *`preflight_status_check.png`* — ArduPilot preflight status panel showing hardware health, sensor calibration (gyro, accelerometer, barometer, magnetometer), EKF status, firmware version, and system-wide ARM checks. All subsystems are validated before flight.
+
+![Preflight Status & Diagnostics](preflight_status_check.png)
 
 ---
 
