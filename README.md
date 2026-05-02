@@ -36,12 +36,16 @@ All modules share a common MAVLink transport layer and are designed to operate t
 | Feature | Description |
 |---|---|
 | **INS Navigation** | Dead-reckoning via IMU integration — body-to-world frame rotation, gravity compensation, velocity & position tracking. No GPS required. |
-| **A\* Path Planning** | 8-directional A\* on a 50×50 m occupancy grid with Euclidean heuristic and obstacle inflation. |
+| **A\* Path Planning** | 8-directional A\* on a 50x50 m occupancy grid with Euclidean heuristic and obstacle inflation. |
 | **MAVLink Integration** | `SET_POSITION_TARGET_LOCAL_NED` setpoints, ARM/DISARM, mode switching, `SCALED_IMU2` telemetry. Works over UDP, TCP, or serial. |
 | **Fleet Coordination** | N drones in parallel threads. Broadcast missions or individual assignments. Emergency land all. |
+| **Aerospace Control** | Full Cascaded PID position loops, explicit jerk limits, 8Hz D-term LPF, and back-calculation Anti-Windup. |
+| **Safety Guarantees** | Control Barrier Functions (CBF) for provable 1.5m minimum separation. Runtime Safety Invariant monitor. Lyapunov stability certificate. NaN/Inf output guards. |
+| **Collision Avoidance** | Velocity Obstacle (VO) prediction with cross-product discriminant. Emergency envelope with aggregated multi-threat repulsion and deterministic symmetry-breaking. |
+| **Geofence** | Absolute Geofence dominance (Hard RTL on breach, sliding along boundaries) prioritized over all mission logic. |
 | **SQLite Database** | 3-table schema: `flight_logs`, `ins_telemetry`, `missions`. Thread-safe with JSON export. |
 | **Mission Planner GCS** | Native integration with Mission Planner — acts as a MAVLink relay, allowing GCS to discover and control the entire swarm through standard UDP/TCP ports. |
-| **Hardware Platform** | Optimized for **Pixhawk Cube Orange** + **Raspberry Pi 4** (Companion Computer) via Serial/MAVLink. |
+| **Hardware Platform** | Optimized for **Pixhawk Cube Orange** + **Raspberry Pi 4** (Companion Computer) via Serial/MAVLink. HITL-ready. |
 | **Advanced Relay** | High-performance MAVLink multiplexer (`swarm_gcs_relay.py`) for aggregating swarm traffic into a single GCS instance. |
 | **Encryption** | AES-GCM encrypted inter-drone communication with anti-replay protection (`swarm_security.py`). |
 
@@ -52,6 +56,8 @@ All modules share a common MAVLink transport layer and are designed to operate t
 ```
 swayam/
 ├── swayam_core.py              # Core library — 5 classes
+├── swarm_autonomous_logic.py   # Swarm logic — VO, flocking, PID, geofence
+├── safety_guarantees.py        # CBF, Lyapunov, SafetyInvariant, IEEE-754 guards
 ├── swarm_gcs_relay.py          # MAVLink multiplexer / router
 ├── advanced_telem_bridge.py    # INS-to-MAVLink telemetry mapper
 ├── mission_planner_config.py   # Mission Planner connection helper
@@ -61,11 +67,10 @@ swayam/
 ├── mission_manager.py          # Multi-drone waypoint mission handler
 ├── system_health.py            # RPi4 + Pixhawk resource monitoring
 ├── swarm_security.py           # AES-GCM encryption & anti-replay
-├── swarm_autonomous_logic.py   # Leader-follower & collision avoidance
 ├── swarm_commands.py           # Inter-drone command definitions
 ├── pi_hardware_config.py       # RPi 4 + Cube Orange hardware config
 ├── swarm_sync.py               # Multi-drone synchronization logic
-├── test_swayam.py              # pytest unit tests
+├── tests/                      # 57 pytest tests (safety, swarm, stress, comm)
 ├── requirements.txt
 └── README.md
 ```
@@ -209,6 +214,43 @@ INS data is sourced from `SCALED_IMU2` MAVLink messages (units: milli-g, milli-r
 
 ---
 
+## Aerospace-Grade Control Architecture
+
+Swayam implements a rigorously constrained control stack for Hardware-In-The-Loop (HITL) and real-world deployment:
+
+- **Cascaded PID Loops:** Outer position-to-velocity loop drives an inner velocity-to-acceleration loop. Outputs bounded velocity vectors to the FCU.
+- **Continuous Gain Scheduling:** PID gains are linearly interpolated (LERP) based on ESKF confidence scores to dynamically damp responses when sensor quality drops.
+- **Physical Envelope Limits:** Output signals are actively filtered with Jerk limits (`j_max = 20 m/s^3`), Low-Pass Filters (8 Hz) on derivative terms, and formal Back-Calculation Anti-Windup.
+- **Absolute Safety Hierarchy:** `Geofence > Collision > Stability > Formation > Mission`. If the horizontal/vertical boundary is breached, the drone immediately triggers an RTL, abandoning all other swarm logic.
+
+---
+
+## Safety Guarantees — `safety_guarantees.py`
+
+The system provides mathematically provable safety through three formal layers:
+
+| Layer | Mechanism | Guarantee |
+|---|---|---|
+| **Control Barrier Function** | `h(x) = \|\|p_i - p_j\|\|^2 - d_safe^2` | Minimum 1.5m pairwise separation via velocity projection |
+| **Safety Invariant Monitor** | Runtime assertion on separation, velocity, geofence | Logs all violations with timestamps |
+| **Lyapunov Certificate** | `V(e) = 0.5 * (w_p * \|\|e_p\|\|^2 + w_v * \|\|e_v\|\|^2)` | PID controller energy is non-increasing |
+
+**CBF Enforcement Flow:**
+
+```
+Mission Velocity --> Flocking Blend --> Geofence Clamp --> CBF Projection --> PID --> Sanitize --> FCU
+                                                            |
+                                              Enforces: dh/dt + alpha * h >= 0
+                                              Method:   Analytical half-space projection
+```
+
+**Numerical Robustness:**
+- IEEE-754 safe division (`safe_div`) and normalization (`safe_normalize`)
+- NaN/Inf output guard (`sanitize_output`) on every control path
+- VO miss-distance uses exact cross-product formula: `d_miss = |dp x dv| / |dv|`
+
+---
+
 ## A* Path Planning
 
 | Parameter | Value |
@@ -296,12 +338,15 @@ MIT — see [LICENSE](LICENSE)
 
 ## Roadmap
 
-- [ ] GPS/INS fusion (Extended Kalman Filter)
 - [ ] 3D voxel grid for obstacle avoidance
 - [ ] WebSocket live telemetry (replace polling)
 - [ ] ROS 2 bridge node
-- [ ] Geofence enforcement
-- [ ] Multi-vehicle conflict resolution
+- [x] GPS/INS fusion (Error-State Kalman Filter)
+- [x] Geofence enforcement
+- [x] Multi-vehicle conflict resolution
+- [x] Control Barrier Function safety layer
+- [x] Formal Lyapunov stability verification
+- [x] Monte Carlo swarm validation (100 runs)
 
 ---
 
