@@ -1,4 +1,4 @@
-"""pytest configuration for Swayam tests."""
+                                            
 import sys
 import os
 

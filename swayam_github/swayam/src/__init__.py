@@ -1,7 +1,7 @@
-"""
-Swayam — MAVLink Multi-Drone Fleet Management with INS Navigation
-"""
-from .swayam_core import (
+\
+\
+   
+from .core import (
     INSState,
     GridMap,
     DroneAgent,

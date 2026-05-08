@@ -27,12 +27,12 @@
 ```
 swayam/
 ├── src/
-│   └── swayam_core.py          # Core library — 5 classes
-├── swayam_dashboard.py         # Flask web dashboard
+│   └── core.py          # Core library — 5 classes
+├── dash.py         # Flask web dashboard
 ├── scripts/
-│   └── run_simulation.py       # Headless simulation runner
+│   └── sim.py       # Headless simulation runner
 ├── tests/
-│   └── test_swayam.py          # 30+ pytest unit tests
+│   └── test_main.py          # 30+ pytest unit tests
 ├── logs/                       # Auto-created — DB exports
 ├── .github/
 │   └── workflows/
@@ -41,7 +41,7 @@ swayam/
 └── README.md
 ```
 
-### Core Classes (`src/swayam_core.py`)
+### Core Classes (`src/core.py`)
 
 ```
 INSState          Dead-reckoning navigation
@@ -66,7 +66,7 @@ pip install -r requirements.txt
 ### 2. Run Simulation (no hardware needed)
 
 ```bash
-python scripts/run_simulation.py
+python scripts/sim.py
 ```
 
 Output:
@@ -85,7 +85,7 @@ Output:
 ### 3. Launch Dashboard
 
 ```bash
-python swayam_dashboard.py
+python dash.py
 # Open http://localhost:5050
 ```
 
@@ -102,7 +102,7 @@ pytest tests/ -v
 ### ArduPilot / Pixhawk (UDP)
 
 ```python
-from src.swayam_core import SwayamFleet
+from src.core import SwayamFleet
 
 fleet = SwayamFleet()
 fleet.add_drone("ALPHA", system_id=1,
@@ -130,7 +130,7 @@ sim_vehicle.py -v ArduCopter --out=udp:127.0.0.1:14550
 
 # Connect Swayam
 python -c "
-from src.swayam_core import SwayamFleet
+from src.core import SwayamFleet
 f = SwayamFleet()
 f.add_drone('SIM', connection_string='udp:127.0.0.1:14550', simulation=False)
 f.connect_all()

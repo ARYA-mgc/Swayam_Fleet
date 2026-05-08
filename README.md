@@ -1,116 +1,81 @@
-# Swayam — MAVLink Swarm Communication & Fleet Management
+# Swayam Fleet (Or: How I learned to stop worrying and love UDP packet loss)
 
-> **Swarm Communication System** for INS-guided, GPS-independent multi-drone coordination. Developed as part of the [ins-drone-pixhawk](https://github.com/ARYA-mgc/ins-drone-pixhawk) ecosystem by **ARYA-mgc**.
+Code to make a bunch of Raspberry Pi 4s talk to Pixhawks so they don't crash into each other.
+Built this because open-source options either need GPS (gross) or don't actually stop the drones from playing bumper cars in mid-air.
 
-<p align="center">
-  <img src="swarm_formation_flight.jpeg" alt="Swayam Swarm Drones — Formation Flight" width="720"/>
-  <br/>
-  <em>Multi-rotor drones performing coordinated formation flight — real-world swarm deployment</em>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-  <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"/>
-  <img src="https://img.shields.io/badge/protocol-MAVLink_2.0-FF6600?style=for-the-badge" alt="MAVLink"/>
-  <img src="https://img.shields.io/badge/hardware-Pixhawk_Cube_Orange-1a1a2e?style=for-the-badge" alt="Pixhawk"/>
-  <img src="https://img.shields.io/badge/companion-Raspberry_Pi_4-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white" alt="RPi4"/>
-</p>
+![tests](https://github.com/ARYA-mgc/Swayam_Fleet/actions/workflows/test.yml/badge.svg)
 
 ---
 
-## Ecosystem
+## What this mess actually does
 
-**Swayam** is a module within the **ins-drone-pixhawk** ecosystem — a collection of repositories for building autonomous, GPS-denied drone systems:
+- Runs a `DroneAgent` on each drone. Mostly it just yells MAVLink commands at the flight controller until it listens.
+- `AutonomousSwarmLogic`: Reynolds flocking + Velocity Obstacles + some math I copied from a paper to make it look legit.
+- "CBF projection" — basically just a fancy way of saying "don't get closer than 1.5m or the code will force you away".
+- Geofence is absolute. If a drone tries to escape, it gets put in RTL timeout.
+- State is shared over UDP telemetry. Yes, it drops packets. No, I haven't fixed it yet.
+- SQLite database logs everything so when a drone inevitably crashes, I have proof it wasn't my fault.
 
-| Repository | Role |
-|---|---|
-| [`ins-drone-pixhawk`](https://github.com/ARYA-mgc/ins-drone-pixhawk) | Core INS navigation, sensor fusion & flight control |
-| **`Swayam_Fleet`** *(this repo)* | Multi-drone swarm coordination, fleet management & GCS relay |
-
-All modules share a common MAVLink transport layer and are designed to operate together on **Pixhawk Cube Orange** + **Raspberry Pi 4** hardware.
-
----
-
-## Features
-
-| Feature | Description |
-|---|---|
-| **INS Navigation** | Dead-reckoning via IMU integration — body-to-world frame rotation, gravity compensation, velocity & position tracking. No GPS required. |
-| **A\* Path Planning** | 8-directional A\* on a 50x50 m occupancy grid with Euclidean heuristic and obstacle inflation. |
-| **MAVLink Integration** | `SET_POSITION_TARGET_LOCAL_NED` setpoints, ARM/DISARM, mode switching, `SCALED_IMU2` telemetry. Works over UDP, TCP, or serial. |
-| **Fleet Coordination** | N drones in parallel threads. Broadcast missions or individual assignments. Emergency land all. |
-| **Aerospace Control** | Full Cascaded PID position loops, explicit jerk limits, 8Hz D-term LPF, and back-calculation Anti-Windup. |
-| **Safety Guarantees** | Control Barrier Functions (CBF) for provable 1.5m minimum separation. Runtime Safety Invariant monitor. Lyapunov stability certificate. NaN/Inf output guards. |
-| **Collision Avoidance** | Velocity Obstacle (VO) prediction with cross-product discriminant. Emergency envelope with aggregated multi-threat repulsion and deterministic symmetry-breaking. |
-| **Geofence** | Absolute Geofence dominance (Hard RTL on breach, sliding along boundaries) prioritized over all mission logic. |
-| **SQLite Database** | 3-table schema: `flight_logs`, `ins_telemetry`, `missions`. Thread-safe with JSON export. |
-| **Mission Planner GCS** | Native integration with Mission Planner — acts as a MAVLink relay, allowing GCS to discover and control the entire swarm through standard UDP/TCP ports. |
-| **Hardware Platform** | Optimized for **Pixhawk Cube Orange** + **Raspberry Pi 4** (Companion Computer) via Serial/MAVLink. HITL-ready. |
-| **Advanced Relay** | High-performance MAVLink multiplexer (`swarm_gcs_relay.py`) for aggregating swarm traffic into a single GCS instance. |
-| **Encryption** | AES-GCM encrypted inter-drone communication with anti-replay protection (`swarm_security.py`). |
+Part of the [`ins-drone-pixhawk`](https://github.com/ARYA-mgc/ins-drone-pixhawk) ecosystem.
 
 ---
 
-## Architecture
+## Project structure
 
 ```
-swayam/
-├── swayam_core.py              # Core library — 5 classes
-├── swarm_autonomous_logic.py   # Swarm logic — VO, flocking, PID, geofence
-├── safety_guarantees.py        # CBF, Lyapunov, SafetyInvariant, IEEE-754 guards
-├── swarm_gcs_relay.py          # MAVLink multiplexer / router
-├── advanced_telem_bridge.py    # INS-to-MAVLink telemetry mapper
-├── mission_planner_config.py   # Mission Planner connection helper
-├── mavlink_bridge.py           # Robust Pi-to-Cube MAVLink bridge
-├── swarm_telemetry.py          # Swarm-wide UDP telemetry broadcaster
-├── pi4_swarm_node.py           # Main RPi4 node controller
-├── mission_manager.py          # Multi-drone waypoint mission handler
-├── system_health.py            # RPi4 + Pixhawk resource monitoring
-├── swarm_security.py           # AES-GCM encryption & anti-replay
-├── swarm_commands.py           # Inter-drone command definitions
-├── pi_hardware_config.py       # RPi 4 + Cube Orange hardware config
-├── swarm_sync.py               # Multi-drone synchronization logic
-├── tests/                      # 57 pytest tests (safety, swarm, stress, comm)
-├── requirements.txt
-└── README.md
+src/
+  swayam/
+    core/
+      core.py          # fleet coordinator, drone agent, DB, A* grid map
+      navcore/                # ESKF state publisher (shared with ins-drone-pixhawk)
+    control/
+      logic.py   # VO avoidance, flocking, PID, geofence
+      safety.py        # CBF, Lyapunov certificate, IEEE-754 guards
+      mission.py          # multi-drone waypoint missions
+      mp.py
+    comms/
+      mav.py           # robust Pi-to-Cube MAVLink bridge
+      bridge.py    # INS -> MAVLink message mapper
+      relay.py          # MAVLink multiplexer for GCS
+      telem.py          # UDP swarm state broadcaster
+      sync.py               # multi-drone synchronization
+      sec.py           # AES-GCM encrypted comms + anti-replay
+      cmds.py           # inter-drone command definitions
+    hardware/
+      node.py           # main RPi4 entry point
+      hw.py
+      health.py
+  scripts/
+    sim.py
+    stress.py
+tests/                        # pytest suite (57 tests)
+docs/assets/                  # screenshots, plots
+.env.example
+requirements.txt
 ```
-
-### Core Classes — `swayam_core.py`
-
-| Class | Responsibility |
-|---|---|
-| `INSState` | Dead-reckoning navigation (strapdown INS) |
-| `GridMap` + `A*` | Occupancy grid & optimal path planning |
-| `DroneAgent` | Single drone — MAVLink I/O, telemetry, missions |
-| `FlightDatabase` | SQLite persistence layer |
-| `SwayamFleet` | Fleet coordinator — parallel missions, logging |
 
 ---
 
-## Quick Start
-
-### 1. Clone & Install
+## Quick start
 
 ```bash
 git clone https://github.com/ARYA-mgc/Swayam_Fleet.git
 cd Swayam_Fleet
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
-### 2. Run Simulation
+Run simulation (no hardware needed):
 
 ```bash
-python scripts/run_simulation.py
+python src/scripts/sim.py
 ```
 
-### 3. Connect Mission Planner
+Connect Mission Planner:
+1. UDP → Connect → port `14550`
+2. Drones ALPHA, BETA, GAMMA show up automatically
 
-1. Open **Mission Planner**.
-2. Select **UDP** → click **Connect**.
-3. Enter port `14550`.
-4. Drones **ALPHA**, **BETA**, and **GAMMA** will appear automatically.
-
-### 4. Run Tests
+Run tests:
 
 ```bash
 pytest tests/ -v
@@ -118,184 +83,133 @@ pytest tests/ -v
 
 ---
 
-## Hardware Integration
+## Real hardware
 
-### ArduPilot / Pixhawk (UDP)
+**ArduPilot / Pixhawk over UDP:**
 
 ```python
-from src.swayam_core import SwayamFleet
+from src.swayam.core.core import SwayamFleet
 
 fleet = SwayamFleet()
 fleet.add_drone("ALPHA", system_id=1,
                 connection_string="udp:192.168.1.10:14550",
                 simulation=False)
-fleet.connect_all()
-fleet.execute_mission("ALPHA", goal_n=20.0, goal_e=15.0, altitude=10.0)
+await fleet.connect_all()
+await fleet.execute_mission("ALPHA", goal_n=20.0, goal_e=15.0, altitude=10.0)
 ```
 
-### STM32 + CAN-MAVLink Bridge (Serial)
+Uncomment `pymavlink==2.4.41` in `requirements.txt` before connecting real hardware.
+
+**Serial (RPi4 → Cube Orange):**
 
 ```python
 fleet.add_drone("BETA", system_id=2,
-                connection_string="/dev/ttyUSB0,115200",
+                connection_string="/dev/ttyAMA0,921600",
                 simulation=False)
 ```
 
-> **Note:** Uncomment `pymavlink>=2.4.37` in `requirements.txt` before connecting real hardware.
-
-### SITL (Software in the Loop)
+**SITL:**
 
 ```bash
-# Start ArduPilot SITL
 sim_vehicle.py -v ArduCopter --out=udp:127.0.0.1:14550
-
-# Connect Swayam
-python -c "
-from src.swayam_core import SwayamFleet
-f = SwayamFleet()
-f.add_drone('SIM', connection_string='udp:127.0.0.1:14550', simulation=False)
-f.connect_all()
-f.execute_mission('SIM', 10, 10, 15)
-"
+python src/scripts/sim.py
 ```
 
 ---
 
-## Visual Documentation
+## Architecture
 
-### Mission Planner GCS Interface
-> *`mission_planner_gcs.jpg`* — Mission Planner interface managing a fleet of drones in `GUIDED` mode with real-time telemetry overlays and waypoint tracking.
+```mermaid
+graph TD
+    classDef l3 fill:#1a1a2e,stroke:#f59e0b,stroke-width:2px,color:#fff;
+    classDef l2 fill:#16213e,stroke:#10b981,stroke-width:2px,color:#fff;
+    classDef l1 fill:#0f3460,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef l0 fill:#111827,stroke:#ef4444,stroke-width:2px,color:#fff;
+    classDef db fill:#2c3e50,stroke:#8b5cf6,stroke-width:2px,color:#fff;
+    
+    subgraph GCS_Layer [GCS]
+        MP[Mission Planner<br>UDP / TCP / Serial]:::db
+        Relay[GCS Relay<br>MAVLink Multiplexer]:::l3
+        MP <-->|Aggregated Streams| Relay
+    end
 
-![Mission Planner GCS Interface](mission_planner_gcs.jpg)
+    subgraph Swarm_Logic [Swarm Layer]
+        Fleet[Fleet Coordinator<br>Parallel Mission Execution]:::l2
+        Safety[Safety Layer<br>CBF / Lyapunov / IEEE-754]:::l2
+        Logic[Autonomous Logic<br>VO Avoidance / Flocking]:::l2
+        Nav[GridMap + A*<br>Occupancy Path Planning]:::l2
+        
+        Relay <-->|AES-GCM| Fleet
+        Fleet --> Safety
+        Fleet --> Logic
+        Fleet --> Nav
+    end
 
----
+    subgraph Agent_Layer [Drone Agents]
+        Agent[DroneAgent<br>RPi4 Companion]:::l1
+        Sync[Swarm Sync<br>State + Anti-Replay]:::l1
+        DB[(SQLite<br>Flight Logs)]:::db
+        
+        Fleet <-->|Mission| Agent
+        Agent <--> Sync
+        Agent --> DB
+    end
 
-### Preflight Status & Diagnostics
-> *`preflight_status_check.png`* — ArduPilot preflight status panel showing hardware health, sensor calibration (gyro, accelerometer, barometer, magnetometer), EKF status, firmware version, and system-wide ARM checks. All subsystems are validated before flight.
-
-![Preflight Status & Diagnostics](preflight_status_check.png)
-
----
-
-### Swarm Formation Flight
-> *`swarm_formation_flight.jpeg`* — Two multi-rotor drones performing coordinated formation flight over an open field, demonstrating real-world swarm deployment and inter-drone spatial awareness.
-
-![Swarm Formation Flight](swarm_formation_flight.jpeg)
-
----
-
-### Fleet Distance Metrics
-> *`fleet_distance_metrics.jpg`* — Plots the distance between Agent 1 and other swarm members. Critical for collision avoidance — agents maintain safe separation buffers while following independent paths.
-
-![Fleet Distance Metrics](fleet_distance_metrics.jpg)
-
----
-
-### Waypoint Convergence
-> *`waypoint_convergence.jpg`* — Tracks the distance from the swarm centroid to target waypoints. The periodic "sawtooth" pattern indicates rapid convergence to new targets as they are assigned.
-
-![Waypoint Convergence Tracking](waypoint_convergence.jpg)
-
----
-
-## INS Navigation Detail
-
-The `INSState` class implements a strapdown Inertial Navigation System:
-
-| Step | Operation | Formula |
-|---|---|---|
-| 1 | **Attitude Update** — Gyroscope integration | `roll += ωx · dt`, `pitch += ωy · dt`, `yaw += ωz · dt` |
-| 2 | **Body → World Rotation** | Full ZYX Euler rotation matrix applied to accelerometer readings |
-| 3 | **Gravity Removal** | Subtract `g = 9.80665 m/s²` from world-frame Z (NED down) |
-| 4 | **Velocity Integration** | `v += a_world · dt` |
-| 5 | **Position Integration** | `p += v · dt` |
-
-INS data is sourced from `SCALED_IMU2` MAVLink messages (units: milli-g, milli-rad/s).
-
----
-
-## Aerospace-Grade Control Architecture
-
-Swayam implements a rigorously constrained control stack for Hardware-In-The-Loop (HITL) and real-world deployment:
-
-- **Cascaded PID Loops:** Outer position-to-velocity loop drives an inner velocity-to-acceleration loop. Outputs bounded velocity vectors to the FCU.
-- **Continuous Gain Scheduling:** PID gains are linearly interpolated (LERP) based on ESKF confidence scores to dynamically damp responses when sensor quality drops.
-- **Physical Envelope Limits:** Output signals are actively filtered with Jerk limits (`j_max = 20 m/s^3`), Low-Pass Filters (8 Hz) on derivative terms, and formal Back-Calculation Anti-Windup.
-- **Absolute Safety Hierarchy:** `Geofence > Collision > Stability > Formation > Mission`. If the horizontal/vertical boundary is breached, the drone immediately triggers an RTL, abandoning all other swarm logic.
-
----
-
-## Safety Guarantees — `safety_guarantees.py`
-
-The system provides mathematically provable safety through three formal layers:
-
-| Layer | Mechanism | Guarantee |
-|---|---|---|
-| **Control Barrier Function** | `h(x) = \|\|p_i - p_j\|\|^2 - d_safe^2` | Minimum 1.5m pairwise separation via velocity projection |
-| **Safety Invariant Monitor** | Runtime assertion on separation, velocity, geofence | Logs all violations with timestamps |
-| **Lyapunov Certificate** | `V(e) = 0.5 * (w_p * \|\|e_p\|\|^2 + w_v * \|\|e_v\|\|^2)` | PID controller energy is non-increasing |
-
-**CBF Enforcement Flow:**
-
-```
-Mission Velocity --> Flocking Blend --> Geofence Clamp --> CBF Projection --> PID --> Sanitize --> FCU
-                                                            |
-                                              Enforces: dh/dt + alpha * h >= 0
-                                              Method:   Analytical half-space projection
+    subgraph HW_Layer [Hardware]
+        Bridge[MAVLink Bridge<br>Pi → Cube Orange]:::l0
+        FCU((Pixhawk Cube Orange)):::l0
+        INS[NavCore ESKF<br>Dead-Reckoning]:::l0
+        
+        Agent <-->|Setpoints| Bridge
+        Bridge <--> FCU
+        FCU -->|SCALED_IMU2| INS
+        INS -->|State| Agent
+    end
 ```
 
-**Numerical Robustness:**
-- IEEE-754 safe division (`safe_div`) and normalization (`safe_normalize`)
-- NaN/Inf output guard (`sanitize_output`) on every control path
-- VO miss-distance uses exact cross-product formula: `d_miss = |dp x dv| / |dv|`
+**Control priority (strict):** `Geofence > Collision > Stability > Formation > Mission`
+
+The CBF layer sits between the swarm logic output and the PID velocity controller. If the commanded velocity would cause two drones to come within 1.5m of each other, it gets projected onto the safe half-space before reaching the FCU.
 
 ---
 
-## A* Path Planning
+## Safety layer
 
-| Parameter | Value |
-|---|---|
-| Grid | 50 × 50 cells, 1 m/cell |
-| Start | Drone's current INS position (mapped to grid) |
-| Goal | Target N/E coordinates |
-| Movement | 8-directional (diagonal allowed) |
-| Heuristic | Euclidean distance (admissible → optimal) |
-| Obstacles | Radius-based inflation |
+`safety.py` implements three things:
+
+**ControlBarrierFunction** — projects velocity commands to maintain `h(x) = ||p_i - p_j||² - d_safe² >= 0` for all drone pairs. Uses iterative half-space projection (3 passes, converges for swarms up to ~10 drones).
+
+**SafetyInvariant** — runtime monitor that checks separation, velocity bounds, and geofence at every control tick. Logs violations with timestamps.
+
+**LyapunovCertificate** — verifies the PID controller energy is non-increasing across a flight. Not used in the control loop, useful for post-flight analysis.
+
+---
+
+## Known issues / gotchas
+
+- **VO collision check is 2D only** — altitude separation isn't considered in the VO cone. The emergency envelope handles vertical avoidance separately with a deterministic up/down push based on drone ID hash.
+- **Serial reconnect on timeout** — the MAVLink bridge doesn't auto-reconnect if the serial port disappears (RPi reboot). You have to restart the process. This is the next thing I want to fix.
+- **Simulation battery drain** — simulated battery drains at 0.0001%/tick which is fine for short runs but will trigger RTL after a few hours of simulation.
+- **CBF for >15 drones** — iterative half-space projection starts to degrade with large swarms. Would need to switch to a proper QP solver.
+
+---
+
+## GCS relay
+
+For large swarms, use `SwarmGCSRelay` to aggregate all drone streams into one GCS connection:
 
 ```python
-fleet.add_obstacle(x=10, y=15, radius=2)  # 5×5 blocked area
-path = fleet.plan_path("ALPHA", goal_n=20, goal_e=18)
-```
+from src.swayam.comms.relay import SwarmGCSRelay
 
----
-
-## Mission Planner Integration
-
-The system uses `SwayamFleet` as a MAVLink relay. Each `DroneAgent` connects to a GCS (Mission Planner) and forwards telemetry.
-
-### Advanced Multiplexing — `swarm_gcs_relay.py`
-
-For large swarms, use `SwarmGCSRelay` to aggregate all drones into a single stream:
-
-```python
 relay = SwarmGCSRelay("udpout:127.0.0.1:14550")
-relay.add_drone(1, "udpin:127.0.0.1:14551")  # Drone 1
-relay.add_drone(2, "udpin:127.0.0.1:14552")  # Drone 2
+relay.add_drone(1, "udpin:127.0.0.1:14551")
+relay.add_drone(2, "udpin:127.0.0.1:14552")
 relay.start()
 ```
 
-### INS → MAVLink Mapping — `advanced_telem_bridge.py`
-
-| MAVLink Message | Data Mapped |
-|---|---|
-| `LOCAL_POSITION_NED` | Relative coordinates from start |
-| `GLOBAL_POSITION_INT` | GPS-like visualization on Mission Planner map |
-| `ATTITUDE` | High-rate roll, pitch, yaw |
-| `SYS_STATUS` | Battery and health monitoring |
-
 ---
 
-## Database Schema
+## Database schema
 
 ```sql
 flight_logs     (id, drone_id, timestamp, level, event, details)
@@ -306,52 +220,24 @@ missions        (id, drone_id, start_time, end_time, status,
                                path_json, notes)
 ```
 
----
-
-## CI/CD
-
-GitHub Actions runs on every push:
-
-| Step | Detail |
-|---|---|
-| **Test Matrix** | Python 3.9, 3.10, 3.11 |
-| **Coverage** | Full coverage report |
-| **Simulation** | Headless swarm simulation |
-| **Artifacts** | Uploads `swayam_export.json` |
+WAL mode enabled. Writes go through an async queue with DROP_OLDEST backpressure so the DB never blocks the control loop.
 
 ---
 
-## Contributing
+## Roadmap
 
-1. Fork the repository
-2. Create a feature branch — `git checkout -b feature/my-feature`
-3. Run tests — `pytest tests/ -v`
-4. Submit a pull request
+- [ ] Auto-reconnect on serial port loss
+- [ ] 3D VO (altitude-aware collision prediction)
+- [ ] WebSocket telemetry stream
+- [ ] ROS 2 bridge node
+- [x] GPS/INS fusion (ESKF)
+- [x] Geofence enforcement
+- [x] Multi-vehicle conflict resolution
+- [x] CBF safety projection
+- [x] Lyapunov verification
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
-
----
-
-## Roadmap
-
-- [ ] 3D voxel grid for obstacle avoidance
-- [ ] WebSocket live telemetry (replace polling)
-- [ ] ROS 2 bridge node
-- [x] GPS/INS fusion (Error-State Kalman Filter)
-- [x] Geofence enforcement
-- [x] Multi-vehicle conflict resolution
-- [x] Control Barrier Function safety layer
-- [x] Formal Lyapunov stability verification
-- [x] Monte Carlo swarm validation (100 runs)
-
----
-
-<p align="center">
-  <strong>Part of the <a href="https://github.com/ARYA-mgc/ins-drone-pixhawk">ins-drone-pixhawk</a> ecosystem</strong>
-  <br/>
-  Built by <a href="https://github.com/ARYA-mgc"><strong>ARYA-mgc</strong></a>
-</p>
