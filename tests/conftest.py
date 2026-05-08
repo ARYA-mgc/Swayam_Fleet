@@ -1,4 +1,4 @@
-                                                                           
+# conftest.py — adds src/ and each subpackage to sys.path
 import sys
 import os
 
