@@ -1,7 +1,7 @@
 # Swayam Fleet: Decentralized Swarm Coordination and Safety Framework
 
 [![tests](https://github.com/ARYA-mgc/Swayam_Fleet/actions/workflows/test.yml/badge.svg)](https://github.com/ARYA-mgc/Swayam_Fleet/actions/workflows/test.yml)
-[![Ecosystem](https://img.shields.io/badge/Part%20of-INS--Drone--Pixhawk-blue)](https://github.com/ARYA-mgc/ins-drone-pixhawk)
+[![Ecosystem](https://img.shields.io/badge/Part%20of-NavCore--Pixhawk-blue)](https://github.com/ARYA-mgc/NavCore-Pixhawk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-gray.svg)](https://opensource.org/licenses/MIT)
 
 Swayam Fleet is a production-grade decentralized coordination and safety framework for multi-UAV swarms. Designed for Raspberry Pi 4 companion computers, it interfaces with ArduPilot/Pixhawk flight controllers to provide autonomous flocking, conflict resolution, and deterministic safety guarantees in GPS-denied or degraded environments.
@@ -19,7 +19,7 @@ Swayam Fleet addresses the critical challenges of multi-drone operations by impl
 
 1. **Deterministic Safety via Control Barrier Functions (CBF)**: Unlike traditional potential-field avoidance which can be overcome by high-speed commands, Swayam implements CBF-based velocity projection. This mathematically ensures the system remains within the safe set (minimum separation) at the control-loop level.
 2. **GPS-Degraded Resilience**: While most swarm solutions rely heavily on high-precision GPS, Swayam is architected for INS-heavy state estimation, making it suitable for complex indoor or urban environments.
-3. **Forensic-Grade Persistence**: Utilizes a SQLite WAL (Write-Ahead Logging) backend to store all inter-agent telemetry and internal states asynchronously. This provides a high-fidelity record for post-mission analysis without impacting real-time CPU performance.
+3. **Forensic-Grade Persistence**: Utilizes a SQLite WAL backend to store all inter-agent telemetry and internal states asynchronously. This provides a high-fidelity record for post-mission analysis without impacting real-time CPU performance.
 4. **Encrypted Swarm Mesh**: All inter-drone communication is secured via AES-GCM encryption with anti-replay sequence tracking, providing a secure control layer for mission-critical deployments.
 
 ---
@@ -84,6 +84,7 @@ This ensures the commanded velocity $v_{command}$ is modified only when a safety
 
 ### Repository Structure
 * **src/swayam/core/**: Fleet coordination, DroneAgent, and SQLite WAL persistence.
+* **src/swayam/core/navcore/**: ESKF state estimation API (shared with [NavCore-Pixhawk](https://github.com/ARYA-mgc/NavCore-Pixhawk)).
 * **src/swayam/control/**: VO avoidance, CBF projection, and Lyapunov stability.
 * **src/swayam/comms/**: MAVLink bridges, UDP telemetry, and AES encryption.
 * **src/swayam/hardware/**: RPi4 entry points, system health, and hardware abstraction.
