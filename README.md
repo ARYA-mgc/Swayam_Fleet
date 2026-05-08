@@ -26,28 +26,61 @@ Swayam Fleet addresses the critical challenges of multi-drone operations by impl
 
 ## System Architecture
 
+The Swayam Fleet architecture is partitioned into four distinct operational layers, ensuring a separation of concerns between high-level coordination and low-level flight control.
+
 ```mermaid
-graph TD
+graph TB
     classDef safety fill:#1a1a2e,stroke:#f59e0b,stroke-width:2px,color:#fff;
     classDef logic fill:#16213e,stroke:#10b981,stroke-width:2px,color:#fff;
     classDef hardware fill:#111827,stroke:#ef4444,stroke-width:2px,color:#fff;
-    
-    subgraph Coordination_Layer [Coordination and Planning]
-        Logic[Autonomous Logic<br>VO + Reynolds Flocking]:::logic
-        Planning[Motion Planning<br>A* GridMap]:::logic
+    classDef network fill:#0f3460,stroke:#3b82f6,stroke-width:2px,color:#fff;
+
+    subgraph External_Systems [Ground Control and Monitoring]
+        GCS[Mission Planner / QGC]
+        Relay[GCS Relay / MAVLink Multiplexer]:::network
+        GCS <-->|Mavlink over UDP| Relay
     end
 
-    subgraph Safety_Enforcement_Layer [Safety and Verification]
-        CBF[CBF Projection Layer<br>Quadratic Programming]:::safety
-        Invariant[Safety Invariant Monitor<br>Geofence/Collision]:::safety
-        Lyapunov[Lyapunov Stability Check]:::safety
+    subgraph Agent_Coordination [Swarm Coordination Layer]
+        Fleet[Fleet Coordinator]:::logic
+        Logic[Autonomous Swarm Logic<br>Reynolds + VO]:::logic
+        Plan[Motion Planner<br>A* / GridMap]:::logic
+        
+        Relay <-->|AES-GCM Commands| Fleet
+        Fleet --> Logic
+        Fleet --> Plan
     end
 
-    Logic --> CBF
-    Planning --> CBF
-    CBF --> Invariant
-    Invariant --> MAVLink[MAVLink Bridge]
-    MAVLink --> FCU((Pixhawk Cube Orange)):::hardware
+    subgraph Safety_Core [Safety and Enforcement Layer]
+        CBF[Control Barrier Function<br>QP-based Projection]:::safety
+        Monitor[Safety Invariant Monitor]:::safety
+        DB[(SQLite WAL<br>Telemetry Store)]
+        
+        Logic --> CBF
+        Plan --> CBF
+        CBF --> Monitor
+        Monitor --> DB
+    end
+
+    subgraph Hardware_Interface [Vehicle Hardware Layer]
+        Bridge[MAVLink Bridge]:::network
+        FCU((Pixhawk FCU)):::hardware
+        Nav[NavCore ESKF<br>State Estimation]:::hardware
+        
+        Monitor -->|Safe Setpoints| Bridge
+        Bridge <-->|Serial/UDP| FCU
+        FCU -->|Raw Sensors / IMU| Nav
+        Nav -->|Estimated State| Safety_Core
+        Nav -->|Estimated State| Agent_Coordination
+    end
+
+    subgraph Mesh_Network [Inter-Agent Communication]
+        Sync[Clock Sync / Heartbeat]:::network
+        Telem[UDP Broadcaster]:::network
+        
+        Telem <-->|Swarm State| Agent_Coordination
+        Sync <-->|Temporal Consistency| Agent_Coordination
+    end
 ```
 
 ---
