@@ -396,9 +396,6 @@ MIT — see [LICENSE](LICENSE)
 
 ## Roadmap
 
-- [ ] 3D voxel grid for obstacle avoidance
-- [ ] WebSocket live telemetry (replace polling)
-- [ ] ROS 2 bridge node
 - [x] GPS/INS fusion (Error-State Kalman Filter)
 - [x] Geofence enforcement
 - [x] Multi-vehicle conflict resolution
