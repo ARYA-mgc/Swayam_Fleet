@@ -1,32 +1,50 @@
-# Swayam Fleet: Decentralized Swarm Coordination and Safety Framework
+# Swayam — MAVLink Swarm Communication & Fleet Management
 
 [![tests](https://github.com/ARYA-mgc/Swayam_Fleet/actions/workflows/test.yml/badge.svg)](https://github.com/ARYA-mgc/Swayam_Fleet/actions/workflows/test.yml)
 [![Ecosystem](https://img.shields.io/badge/Part%20of-NavCore--Pixhawk-blue)](https://github.com/ARYA-mgc/NavCore-Pixhawk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-gray.svg)](https://opensource.org/licenses/MIT)
 
-Swayam Fleet is a production-grade decentralized coordination and safety framework for multi-UAV swarms. Designed for Raspberry Pi 4 companion computers, it interfaces with ArduPilot/Pixhawk flight controllers to provide autonomous flocking, conflict resolution, and deterministic safety guarantees in GPS-denied or degraded environments.
+Swarm Communication System for INS-guided, GPS-independent multi-drone coordination. Developed as part of the **NavCore-Pixhawk** ecosystem by [ARYA-mgc](https://github.com/ARYA-mgc).
 
 ![Swarm Formation Flight](docs/assets/swarm_formation_flight.jpeg)
-*Field Validation: Dual-UAV formation flight utilizing decentralized velocity obstacles.*
+*Multi-rotor drones performing coordinated formation flight — real-world swarm deployment.*
 
 ---
 
-## Technical Overview
+## Ecosystem
 
-Swayam Fleet addresses the critical challenges of multi-drone operations by implementing a decentralized architecture where each agent independently computes its navigation and safety constraints. This eliminates single points of failure and allows for scalable swarm sizes.
+Swayam is a module within the NavCore-Pixhawk ecosystem — a collection of repositories for building autonomous, GPS-denied drone systems:
 
-### Unique Value Proposition
+| Repository | Role |
+| :--- | :--- |
+| **[NavCore-Pixhawk](https://github.com/ARYA-mgc/NavCore-Pixhawk)** | Core INS navigation, sensor fusion & flight control |
+| **Swayam_Fleet** (this repo) | Multi-drone swarm coordination, fleet management & GCS relay |
 
-1. **Deterministic Safety via Control Barrier Functions (CBF)**: Unlike traditional potential-field avoidance which can be overcome by high-speed commands, Swayam implements CBF-based velocity projection. This mathematically ensures the system remains within the safe set (minimum separation) at the control-loop level.
-2. **GPS-Degraded Resilience**: While most swarm solutions rely heavily on high-precision GPS, Swayam is architected for INS-heavy state estimation, making it suitable for complex indoor or urban environments.
-3. **Forensic-Grade Persistence**: Utilizes a SQLite WAL backend to store all inter-agent telemetry and internal states asynchronously. This provides a high-fidelity record for post-mission analysis without impacting real-time CPU performance.
-4. **Encrypted Swarm Mesh**: All inter-drone communication is secured via AES-GCM encryption with anti-replay sequence tracking, providing a secure control layer for mission-critical deployments.
+All modules share a common MAVLink transport layer and are designed to operate together on Pixhawk Cube Orange + Raspberry Pi 4 hardware.
+
+---
+
+## Features
+
+| Feature | Description |
+| :--- | :--- |
+| **INS Navigation** | Dead-reckoning via IMU integration — body-to-world frame rotation, gravity compensation, velocity & position tracking. No GPS required. |
+| **A* Path Planning** | 8-directional A* on a 50×50 m occupancy grid with Euclidean heuristic and obstacle inflation. |
+| **MAVLink Integration** | SET_POSITION_TARGET_LOCAL_NED setpoints, ARM/DISARM, mode switching, SCALED_IMU2 telemetry. |
+| **Fleet Coordination** | N drones in parallel threads. Broadcast missions or individual assignments. Emergency land all. |
+| **Aerospace Control** | Cascaded PID position loops, explicit jerk limits (20 m/s³), and back-calculation Anti-Windup. |
+| **Safety Guarantees** | Control Barrier Functions (CBF) for provable 1.5m minimum separation. Runtime Safety Invariant monitor. |
+| **Collision Avoidance** | Velocity Obstacle (VO) prediction with cross-product discriminant. Deterministic symmetry-breaking. |
+| **Geofence** | Absolute Geofence dominance (Hard RTL on breach) prioritized over all mission logic. |
+| **SQLite Database** | 3-table schema: flight_logs, ins_telemetry, missions. Asynchronous WAL mode. |
+| **Mission Planner GCS** | Native integration with Mission Planner — acts as a MAVLink relay for swarm discovery. |
+| **Encryption** | AES-GCM encrypted inter-drone communication with anti-replay protection. |
 
 ---
 
 ## System Architecture
 
-The Swayam Fleet architecture is partitioned into four distinct operational layers, ensuring a separation of concerns between high-level coordination and low-level flight control.
+The Swayam Fleet architecture is partitioned into logical operational layers, ensuring a separation of concerns between high-level coordination and low-level flight control.
 
 ```mermaid
 graph TB
@@ -83,68 +101,109 @@ graph TB
     end
 ```
 
+### Directory Structure
+```text
+src/swayam/
+├── core/
+│   ├── core.py              # Fleet coordinator & DroneAgent logic
+│   └── navcore/             # ESKF state estimation API
+├── control/
+│   ├── logic.py             # VO, flocking, PID, and geofence
+│   ├── safety.py            # CBF, Lyapunov, and IEEE-754 guards
+│   ├── mission.py           # Multi-drone waypoint handler
+│   └── mp.py                # A* GridMap & path planning
+├── comms/
+│   ├── mav.py               # Robust Pi-to-Cube MAVLink bridge
+│   ├── bridge.py            # INS-to-MAVLink telemetry mapper
+│   ├── relay.py             # MAVLink multiplexer (GCS Relay)
+│   ├── telem.py             # UDP swarm state broadcaster
+│   ├── sec.py               # AES-GCM encryption & security
+│   └── sync.py              # Multi-drone synchronization
+├── hardware/
+│   ├── node.py              # Main RPi4 entry point
+│   ├── health.py            # RPi4 + Pixhawk monitoring
+│   └── hw.py                # Hardware-specific configurations
+└── tests/                   # 57+ pytest tests (Safety, Swarm, Stress)
+```
+
 ---
 
-## Performance and Results
+## Core Implementation Details
 
-### Deterministic Separation
-The integrated Control Barrier Functions enforce a strict separation distance. In stress-testing, the safety layer successfully projected 100% of conflicting velocity commands into the safe half-space.
+### INS Navigation Detail
+The `INSState` class implements a strapdown Inertial Navigation System:
 
-![Distance Metrics](docs/assets/fleet_distance_metrics.jpg)
-*Distance monitoring: Maintaining consistent inter-agent separation during high-dynamic maneuvers.*
+| Step | Operation | Formula |
+| :--- | :--- | :--- |
+| 1 | Attitude Update | roll += ωx · dt, pitch += ωy · dt, yaw += ωz · dt |
+| 2 | Body → World Rotation | Full ZYX Euler rotation matrix applied to accelerometer |
+| 3 | Gravity Removal | Subtract g = 9.80665 m/s² from world-frame Z (NED down) |
+| 4 | Velocity Integration | v += a_world · dt |
+| 5 | Position Integration | p += v · dt |
 
-### System Reliability
-The communication protocol has been validated for high-latency environments, maintaining a 94% Packet Delivery Ratio (PDR) while successfully executing multi-waypoint missions.
+### Safety Guarantees — safety.py
+The system provides mathematically provable safety through three formal layers:
 
-![Pre-Flight Status](docs/assets/preflight_status_check.png)
-*Pre-arm validation: The system monitors 48+ hardware and software registers to ensure mission readiness.*
+| Layer | Mechanism | Guarantee |
+| :--- | :--- | :--- |
+| **Control Barrier Function** | h(x) = \|\|p_i - p_j\|\|^2 - d_safe^2 | Minimum 1.5m pairwise separation via velocity projection |
+| **Safety Invariant Monitor** | Runtime assertions | Logs all separation, velocity, and geofence violations |
+| **Lyapunov Certificate** | V(e) = 0.5 * (w_p\|\|e_p\|\|^2 + w_v\|\|e_v\|\|^2) | Ensures PID controller energy is non-increasing |
 
-### Mission Monitoring
-Synchronized execution across multiple agents is visible through standard Ground Control Stations (GCS).
+**CBF Enforcement Flow:**
+`Mission Velocity --> Flocking Blend --> Geofence Clamp --> CBF Projection --> PID --> Sanitize --> FCU`
 
+---
+
+## Visual Documentation
+
+### Mission Planner GCS Interface
 ![Mission Planner GCS](docs/assets/mission_planner_gcs.jpg)
-*GCS visualization: 4-UAV synchronized mission execution in Mission Planner.*
+*Mission Planner managing a fleet of drones in GUIDED mode with real-time telemetry overlays.*
 
----
+### Preflight Status & Diagnostics
+![Preflight Status](docs/assets/preflight_status_check.png)
+*ArduPilot preflight panel showing hardware health and EKF status validation.*
 
-## Technical Specifications
+### Fleet Distance Metrics
+![Fleet Distance](docs/assets/fleet_distance_metrics.jpg)
+*Real-time distance tracking between Agent 1 and other swarm members to maintain safety buffers.*
 
-### Implementation Detail: Safety Projection
-The safety layer solves a Quadratic Programming (QP) optimization at each control tick:
-$$\text{minimize } \|v_{safe} - v_{command}\|^2$$
-$$\text{subject to } \nabla h(x)^T v_{safe} + \alpha h(x) \geq 0$$
-This ensures the commanded velocity $v_{command}$ is modified only when a safety violation is imminent, maintaining mission objective integrity while preventing collisions.
+### Waypoint Convergence Tracking
+![Waypoint Convergence](docs/assets/waypoint_convergence.jpg)
+*Tracking distance from swarm centroid to targets; sawtooth patterns indicate rapid convergence.*
 
-### Repository Structure
-* **src/swayam/core/**: Fleet coordination, DroneAgent, and SQLite WAL persistence.
-* **src/swayam/core/navcore/**: ESKF state estimation API (shared with [NavCore-Pixhawk](https://github.com/ARYA-mgc/NavCore-Pixhawk)).
-* **src/swayam/control/**: VO avoidance, CBF projection, and Lyapunov stability.
-* **src/swayam/comms/**: MAVLink bridges, UDP telemetry, and AES encryption.
-* **src/swayam/hardware/**: RPi4 entry points, system health, and hardware abstraction.
+### Experimental Results: 3D Reconstruction
+![Swarm Trajectories](docs/assets/drones-05-00033-g009-550.jpg)
+*High-fidelity 3D trajectory reconstruction showing global waypoint convergence for a 7-agent swarm.*
 
 ---
 
 ## Quick Start
 
-1. **Environment Setup**:
+1. **Clone & Install**:
    ```bash
    git clone https://github.com/ARYA-mgc/Swayam_Fleet.git
    pip install -r requirements.txt
    ```
-2. **Launch Simulation**:
+2. **Run Simulation**:
    ```bash
    python src/scripts/sim.py
    ```
-3. **Connect GCS**: Route Mission Planner to `127.0.0.1:14550` (UDP).
+3. **Connect Mission Planner**: Select **UDP**, port **14550**. Drones ALPHA, BETA, and GAMMA will appear automatically.
+4. **Run Tests**:
+   ```bash
+   pytest tests/ -v
+   ```
 
 ---
 
-## Experimental Validation
-
-Final analysis of swarm convergence under lossy network conditions (94% PDR).
-
-![Swarm Trajectories](docs/assets/drones-05-00033-g009-550.jpg)
-*3D Trajectory Reconstruction: Global waypoint convergence for a 7-agent swarm in decentralized mode.*
+## Roadmap
+- [ ] 3D Velocity Obstacles (Altitude-aware avoidance)
+- [ ] MAVLink-FTP integration for log retrieval
+- [x] Decentralized ESKF (NavCore integration)
+- [x] AES-GCM Encrypted Telemetry
+- [x] CBF-based Safety Enforcement
 
 ---
 MIT License | Developed by [ARYA-mgc](https://github.com/ARYA-mgc)
